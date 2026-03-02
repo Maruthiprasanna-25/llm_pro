@@ -1,0 +1,20 @@
+# Virtual Environment
+venv/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Environment variables
+.env
+
+# Databases
+*.db
+chroma_db/
+
+# Node (if any frontend artifacts accidentally exist)
+node_modules/
+
+node_modules/
+dist/
+.env
