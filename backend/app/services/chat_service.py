@@ -15,10 +15,9 @@ from sqlalchemy.orm import selectinload
 from app.llm.factory import get_llm_provider
 from app.models.message import Message
 from app.models.session import ChatSession
-from app.services.master_service import analyze_request
-from app.services.planner_service import generate_plan
 from app.services.agent_orchestrator import orchestrator
-from app.utils.exceptions import LLMError, NotFoundError
+from app.services.shield_service import shield_service
+from app.utils.exceptions import LLMError, NotFoundError, SecurityError
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +60,10 @@ async def process_chat(
     4. Save and return response with routing metadata
     """
     session = await _get_session_with_messages(session_id, user_id, db)
+
+    # Enterprise Guardrail: Semantic Inspection
+    if not await shield_service.inspect_input(user_message):
+        raise SecurityError("Input blocked by enterprise security policy.")
 
     # Persist user message
     user_msg = Message(

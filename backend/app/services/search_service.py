@@ -1,84 +1,71 @@
 """
-Search service — official Brave Search API integration.
+Tavily Search Service — Official API integration for AI-optimized web search.
 """
 
-from __future__ import annotations
-
-import logging
-from typing import Any
-
 import httpx
+import logging
+from typing import List, Dict, Any, Optional
 from app.core.config import get_settings
+from app.services.security_service import security_service
 from app.services.cache_service import cache_service
 
 logger = logging.getLogger(__name__)
 
-class SearchService:
-    """
-    Handles real-time web searches using the Brave Search API.
-    """
-
+class TavilySearchService:
     def __init__(self):
         settings = get_settings()
-        self.api_key = settings.BRAVE_SEARCH_API_KEY
-        self.base_url = "https://api.search.brave.com/res/v1/web/search"
-        self.timeout = httpx.Timeout(20.0, connect=5.0)
+        self.api_key = settings.TAVILY_API_KEY
+        self.base_url = "https://api.tavily.com/search"
 
-    async def search(self, query: str, count: int = 5) -> list[dict[str, Any]]:
+    async def search(self, query: str, search_depth: str = "basic") -> List[Dict[str, Any]]:
         """
-        Execute a search query and return structured results.
-        Returns a list of dicts with title, url, and snippet.
+        Executes a search using Tavily API.
+        Returns a list of sanitized results.
         """
-        # Check Cache
-        cache_key = cache_service.get_query_key(f"search_{query}")
-        cached_result = cache_service.get(cache_key)
-        if cached_result:
-            logger.info("SearchService: Returning cached results for query: %s", query)
-            return cached_result
-
         if not self.api_key:
-            logger.warning("SearchService: BRAVE_SEARCH_API_KEY not set. Returning empty results.")
+            logger.warning("TavilySearchService: TAVILY_API_KEY not set. Using mock results.")
             return []
 
-        headers = {
-            "Accept": "application/json",
-            "Accept-Encoding": "gzip",
-            "X-Subscription-Token": self.api_key,
-        }
-        params = {
-            "q": query,
-            "count": count,
+        # Check Cache
+        cache_key = cache_service.get_query_key(f"tavily_{query}_{search_depth}")
+        cached = cache_service.get(cache_key)
+        if cached:
+            return cached
+
+        # Validate query length (Security Rule)
+        if len(query) > 300:
+            query = query[:300]
+
+        payload = {
+            "api_key": self.api_key,
+            "query": query,
+            "search_depth": search_depth,
+            "include_answer": False,
+            "include_raw_content": False,
+            "max_results": 5
         }
 
         try:
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
-                resp = await client.get(self.base_url, headers=headers, params=params)
-                resp.raise_for_status()
-                data = resp.json()
-
+            async with httpx.AsyncClient() as client:
+                response = await client.post(self.base_url, json=payload, timeout=10.0)
+                response.raise_for_status()
+                data = response.json()
+                
                 results = []
-                # Brave returns web results in data['web']['results']
-                web_results = data.get("web", {}).get("results", [])
-                for res in web_results:
+                for item in data.get("results", []):
+                    # Sanitize content (Security Rule)
+                    clean_content = security_service.sanitize_web_content(item.get("content", ""))
                     results.append({
-                        "title": res.get("title"),
-                        "url": res.get("url"),
-                        "snippet": res.get("description"), # Brave uses 'description' as snippet
-                        "source": "Brave Search"
+                        "title": item.get("title", "No Title"),
+                        "url": item.get("url", ""),
+                        "content": clean_content
                     })
-                
-                logger.info("SearchService: Successfully retrieved %d results for query: %s", len(results), query)
-                
-                # Store in Cache
+
                 cache_service.set(cache_key, results)
                 return results
 
-        except httpx.HTTPStatusError as e:
-            logger.error("SearchService: HTTP error %d: %s", e.response.status_code, e.response.text)
-            return []
         except Exception as e:
-            logger.error("SearchService: Unexpected error during search: %s", str(e))
+            logger.error(f"TavilySearchService Error: {str(e)}")
             return []
 
-# Singleton instance
-search_service = SearchService()
+search_service = TavilySearchService()

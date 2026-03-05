@@ -7,17 +7,29 @@ from __future__ import annotations
 import json
 import logging
 import re
-from typing import Any
+from typing import List, Dict, Any
 
 from app.services.search_service import search_service
 from app.services.rag_service import rag_service
+from app.services.sandbox_service import sandbox_service
+from app.services.csv_parser_service import csv_parser_service
+from app.services.security_service import security_service
 
 logger = logging.getLogger(__name__)
 
 class ToolExecutionService:
     """
-    Orchestrates the execution of tools (search, retrieve) identified by agents.
+    Orchestrates the execution of tools with enterprise-grade validation.
     """
+    
+    def __init__(self):
+        # In a full enterprise implementation, these would be Pydantic models
+        self.tool_registry = {
+            "web_search": ["query"],
+            "python_sandbox": ["code"],
+            "csv_preview": ["filename"],
+            "retrieve_documents": ["query"]
+        }
 
     async def execute_tools(self, response_text: str) -> list[dict[str, Any]]:
         """
@@ -33,44 +45,88 @@ class ToolExecutionService:
         for match in json_matches:
             try:
                 data = json.loads(match.group(1))
+                
                 action = data.get("action")
-                action_input = data.get("action_input")
-                
-                if not action or not action_input:
+                tool_name = data.get("tool_name")
+                args = data.get("arguments", {})
+
+                # Enterprise Schema Validation
+                if action == "tool_call":
+                    required_args = self.tool_registry.get(tool_name, [])
+                    missing = [arg for arg in required_args if arg not in args]
+                    if missing:
+                        tool_results.append({
+                            "status": "error", 
+                            "message": f"Schema Violation: Missing required arguments for '{tool_name}': {', '.join(missing)}"
+                        })
+                        continue
+
+                if action == "final_answer":
+                    tool_results.append({"status": "final", "content": data.get("content", "")})
                     continue
-                
-                logger.info("ToolExecutionService: Executing tool '%s' with input: %s", action, action_input)
-                
-                result = await self._run_tool(action, action_input)
-                if result:
-                    tool_results.append({
-                        "tool": action,
-                        "query": action_input,
-                        "result": result
-                    })
+
+                if action != "tool_call":
+                    tool_results.append({"status": "error", "message": "Invalid action type."})
+                    continue
+
+                # 2. Whitelist & Security Validation
+                if tool_name == "web_search":
+                    query = args.get("query")
+                    if not query:
+                        tool_results.append({"status": "error", "message": "Missing search query."})
+                        continue
+                    
+                    # Check for injection in query
+                    if security_service.detect_injection(query):
+                        tool_results.append({"status": "error", "message": "Security Alert: Search query contains restricted patterns."})
+                        continue
+
+                    results = await search_service.search(query)
+                    # Store in RAG for later use
+                    await rag_service.add_documents(results, query)
+                    
+                    # Mark as untrusted before returning to LLM
+                    untrusted_data = "\n\n".join([f"Source: {r['url']}\n{r['content']}" for r in results])
+                    tool_results.append({"status": "success", "output": security_service.mark_untrusted(untrusted_data)})
+
+                elif tool_name == "python_sandbox":
+                    code = args.get("code")
+                    if not code:
+                        tool_results.append({"status": "error", "message": "Missing python code."})
+                        continue
+                    
+                    result = sandbox_service.execute_code(code)
+                    tool_results.append({"status": "success", "output": json.dumps(result)})
+
+                elif tool_name == "csv_preview":
+                    filename = args.get("filename")
+                    if not filename:
+                        tool_results.append({"status": "error", "message": "Missing filename for CSV preview."})
+                        continue
+                    
+                    result = csv_parser_service.get_preview(filename)
+                    tool_results.append({"status": "success", "output": json.dumps(result)})
+
+                elif tool_name == "retrieve_documents":
+                    query = args.get("query")
+                    if not query:
+                        tool_results.append({"status": "error", "message": "Missing retrieval query."})
+                        continue
+                    
+                    context = await rag_service.query(query)
+                    tool_results.append({"status": "success", "output": security_service.mark_untrusted(context)})
+
+                else:
+                    tool_results.append({"status": "error", "message": f"Tool '{tool_name}' is not authorized."})
+
             except (json.JSONDecodeError, ValueError) as e:
                 logger.warning("ToolExecutionService: Failed to parse tool call: %s", str(e))
                 continue
+            except Exception as e:
+                logger.error(f"ToolExecution Error: {str(e)}")
+                tool_results.append({"status": "error", "message": str(e)})
         
         return tool_results
-
-    async def _run_tool(self, action: str, action_input: str) -> Any:
-        """Dispatches to the specific service."""
-        if action == "web_search":
-            # 1. Search
-            results = await search_service.search(action_input)
-            # 2. Store in RAG for future context if needed
-            if results:
-                await rag_service.add_documents(results, action_input)
-            return results
-            
-        elif action == "retrieve_documents":
-            # Direct query to RAG
-            return await rag_service.query(action_input)
-            
-        else:
-            logger.warning("ToolExecutionService: Unknown action '%s'", action)
-            return None
 
 # Singleton instance
 tool_execution_service = ToolExecutionService()

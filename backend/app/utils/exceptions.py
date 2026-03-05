@@ -38,6 +38,12 @@ class LLMError(AppException):
         super().__init__(status_code=502, detail=detail)
 
 
+class SecurityError(AppException):
+    """Exception raised for security policy violations."""
+    def __init__(self, detail: str = "Security policy violation"):
+        super().__init__(status_code=403, detail=detail)
+
+
 # ── Handler Registration ─────────────────────────────────
 
 

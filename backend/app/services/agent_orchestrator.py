@@ -75,39 +75,25 @@ class AgentOrchestrator:
 
     async def _execute_agent_task(self, agent: str, task_description: str) -> str:
         """
-        Calls a specific agent and handles tool-use loops if the agent requests them.
+        Executes a task for a specific agent with an iterative tool-use loop.
+        Phase 3: Max 5 iterations, secure tool validation.
         """
-        # 1. Initial call to the agent
-        if agent == "research":
-            current_output = await perform_research(task_description)
-        elif agent == "analyst":
-            current_output = await perform_analysis(task_description)
-        elif agent == "tech":
-            current_output = await perform_tech_task(task_description)
-        elif agent == "critic":
-            current_output = await perform_review(task_description)
-        else:
-            return f"Error: Unknown agent {agent}"
+        messages = [{"role": "system", "content": f"Task: {task_description}"}]
+        iterations = 0
+        max_iterations = 5
 
-        # 2. Tool-Use Loop (Max 3 iterations for safety)
-        for _ in range(3):
-            tool_calls = await tool_execution_service.execute_tools(current_output)
-            if not tool_calls:
-                break
-            
-            logger.info("AgentOrchestrator: Processing %d tool results for %s", len(tool_calls), agent)
-            
-            # Construct context from tool results
-            tool_context = "\n--- Tool Results ---\n"
-            for t in tool_calls:
-                tool_context += f"Tool: {t['tool']}\nResult: {t['result']}\n\n"
-            
-            # Feed results back to the agent
-            # Note: We append the tool results to the description to give the agent context of what's already found.
-            feedback_prompt = f"{task_description}\n\nExisting Progress:\n{current_output}\n\n{tool_context}\n\nPlease proceed based on these results."
+        while iterations < max_iterations:
+            iterations += 1
+            logger.info("AgentOrchestrator: Executing %s task (Iteration %d/%d)", agent, iterations, max_iterations)
+
+            # Call agent logic (this calls the specific agent provider)
+            # For simplicity, we assume agents produce the required JSON format
+            from app.services.research_service import research_service
+            from app.services.analyst_service import perform_analysis
+            from app.services.tech_service import perform_tech_task
             
             if agent == "research":
-                current_output = await perform_research(feedback_prompt)
+                response = await research_service.run_research_task(task_description)
             elif agent == "analyst":
                 current_output = await perform_analysis(feedback_prompt)
             elif agent == "tech":

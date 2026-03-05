@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 from functools import lru_cache
 from pathlib import Path
+from typing import Optional
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -39,7 +40,8 @@ class Settings(BaseSettings):
     OLLAMA_BASE_URL: str = "http://localhost:11434"
     OPENAI_API_KEY: str = ""
     GROQ_API_KEY: str = ""
-    BRAVE_SEARCH_API_KEY: str = ""
+    BRAVE_SEARCH_API_KEY: Optional[str] = None
+    TAVILY_API_KEY: Optional[str] = None
     CHROMA_DB_PATH: str = "./chroma_db"
     EMBEDDING_MODEL: str = "nomic-embed-text"
 

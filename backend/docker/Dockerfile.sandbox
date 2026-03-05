@@ -1,0 +1,29 @@
+# Hardened Python Sandbox Dockerfile
+# Based on Zero-Trust Architecture Principles
+
+FROM python:3.11-slim-bullseye
+
+# Security: Step 1 - Non-root user
+RUN groupadd -r sandboxuser && useradd -r -g sandboxuser sandboxuser
+
+# Security: Step 2 - Minimal environment
+WORKDIR /home/sandboxuser
+# COPY requirements_sandbox.txt .
+# RUN pip install --no-cache-dir -r requirements_sandbox.txt
+
+# Security: Step 3 - Read-only filesystem except for /tmp
+# (Implemented via container runtime flags)
+
+# Security: Step 4 - Remove dangerous shells and binaries
+RUN rm -rf /bin/sh /bin/bash /usr/bin/apt* /usr/bin/dpkg*
+
+# Security: Step 5 - Application code
+# (Assuming a small wrapper script for gRPC/HTTP interface)
+# COPY sandbox_wrapper.py .
+
+USER sandboxuser
+
+# Security: Step 6 - No network access (Enforced via --network none)
+# Security: Step 7 - Memory and CPU limits (Enforced via --memory 128m --cpus 0.5)
+
+CMD ["python", "-m", "app.sandbox_executor"]
